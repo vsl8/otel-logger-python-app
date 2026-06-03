@@ -164,23 +164,25 @@ def log_message(level):
     with tracer.start_as_current_span(f"log-{level}") as span:
         span.set_attribute("log.level", level)
         span.set_attribute("log.message", message)
+        span.set_attribute("telemetry_type", "trace")  # Label for trace
         
-        # Log at the appropriate level
+        # Log at the appropriate level with telemetry_type label
+        log_extra = {"telemetry_type": "log", "level": level}
         if level == "debug":
-            otel_logger.debug(message)
+            otel_logger.debug(message, extra=log_extra)
         elif level == "info":
-            otel_logger.info(message)
+            otel_logger.info(message, extra=log_extra)
         elif level == "warning":
-            otel_logger.warning(message)
+            otel_logger.warning(message, extra=log_extra)
         elif level == "error":
-            otel_logger.error(message)
+            otel_logger.error(message, extra=log_extra)
         elif level == "critical":
-            otel_logger.critical(message)
+            otel_logger.critical(message, extra=log_extra)
         else:
             return jsonify({"error": "Invalid log level"}), 400
         
-        # Increment metric counter
-        log_counter.add(1, {"level": level})
+        # Increment metric counter with telemetry_type label
+        log_counter.add(1, {"level": level, "telemetry_type": "metrics"})
         
         span.add_event(f"Log recorded: {level}")
     
@@ -202,17 +204,20 @@ def generate_trace():
     with tracer.start_as_current_span("parent-operation") as parent_span:
         parent_span.set_attribute("operation.name", operation)
         parent_span.set_attribute("operation.type", "manual")
+        parent_span.set_attribute("telemetry_type", "trace")  # Label for trace
         
         # Create child spans
         with tracer.start_as_current_span("child-operation-1") as child1:
             child1.set_attribute("step", 1)
+            child1.set_attribute("telemetry_type", "trace")
             child1.add_event("Processing step 1")
-            otel_logger.info(f"Trace operation: {operation} - Step 1")
+            otel_logger.info(f"Trace operation: {operation} - Step 1", extra={"telemetry_type": "log"})
         
         with tracer.start_as_current_span("child-operation-2") as child2:
             child2.set_attribute("step", 2)
+            child2.set_attribute("telemetry_type", "trace")
             child2.add_event("Processing step 2")
-            otel_logger.info(f"Trace operation: {operation} - Step 2")
+            otel_logger.info(f"Trace operation: {operation} - Step 2", extra={"telemetry_type": "log"})
         
         parent_span.add_event("All operations completed")
     
@@ -233,10 +238,11 @@ def generate_metrics():
     with tracer.start_as_current_span("generate-metric") as span:
         span.set_attribute("metric.name", metric_name)
         span.set_attribute("metric.value", value)
+        span.set_attribute("telemetry_type", "trace")  # Span is still a trace
         
-        # Record metric
-        log_counter.add(value, {"metric_name": metric_name, "type": "custom"})
-        otel_logger.info(f"Metric recorded: {metric_name} = {value}")
+        # Record metric with telemetry_type label
+        log_counter.add(value, {"metric_name": metric_name, "type": "custom", "telemetry_type": "metrics"})
+        otel_logger.info(f"Metric recorded: {metric_name} = {value}", extra={"telemetry_type": "log"})
     
     return jsonify({
         "success": True,
