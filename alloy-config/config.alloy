@@ -1,0 +1,87 @@
+// 1. RECEIVER: Listen for gRPC OTLP on port 4317 (traces AND logs)
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  
+  output {
+    traces = [otelcol.connector.spanlogs.default.input]
+    logs   = [otelcol.processor.attributes.add_label.input]  // <-- ADD THIS LINE
+  }
+}
+
+// 2. CONNECTOR: Convert traces/spans into logs (for trace context)
+otelcol.connector.spanlogs "default" {
+  spans     = true
+  roots     = true
+  processes = true
+  events    = true
+  
+  output {
+    logs = [otelcol.processor.attributes.add_label.input]
+  }
+}
+
+// 3. ATTRIBUTES PROCESSOR: Set service identifier and Loki label hint
+otelcol.processor.attributes "add_label" {
+  action {
+    key    = "service_name"
+    value  = "python-logger-app"
+    action = "insert"
+  }
+  action {
+    key    = "loki.attribute.labels"
+    value  = "service_name,telemetry_type,level"
+    action = "insert"
+  }
+  output {
+    logs = [otelcol.processor.batch.default.input]
+  }
+}
+
+// 4. PROCESSOR: Batch logs together
+otelcol.processor.batch "default" {
+  output {
+    logs = [otelcol.exporter.loki.default.input]
+  }
+}
+
+// 5. OTLP EXPORTER: Forward to Loki processor
+otelcol.exporter.loki "default" {
+  forward_to = [loki.process.extract_body.receiver]
+}
+
+// 6. LOKI PROCESSOR: Extract log body for display
+loki.process "extract_body" {
+  stage.json {
+    expressions = { 
+      extracted_body = "body",
+      trace_id       = "traceId",
+      span_id        = "spanId",
+      severity       = "severityText",
+      telemetry_type  = "attributes.telemetry_type",
+      level           = "attributes.level",
+    }
+  }
+
+  stage.labels {
+    values = {
+      severity = "",
+      telemetry_type = "",
+      level          = "",
+    }
+  }
+
+  stage.output {
+    source = "extracted_body"
+  }
+
+  forward_to = [loki.write.endpoint.receiver]
+}
+
+// 7. LOKI CLIENT: Write to Loki instance
+loki.write "endpoint" {
+  endpoint {
+    url = "http://loki.dfci.harvard.edu/loki/api/v1/push"
+  }
+}
