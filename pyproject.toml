@@ -1,0 +1,14 @@
+[project]
+name = "otel-logger-app"
+version = "0.1.0"
+description = "Flask app with OpenTelemetry for logs, metrics, and traces"
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.1.3",
+    "grpcio>=1.81.0",
+    "opentelemetry-api>=1.42.1",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.42.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.42.1",
+    "opentelemetry-instrumentation-flask>=0.63b1",
+    "opentelemetry-sdk>=1.42.1",
+]
