@@ -76,12 +76,115 @@ loki.process "extract_body" {
     source = "extracted_body"
   }
 
+  forward_to = [loki.process.phi_detector.receiver]
+}
+
+// 7. PHI/HIPAA DETECTOR: Scan logs for potential PHI data
+loki.process "phi_detector" {
+  // Extract PHI patterns using regex - each captures into a named group
+  
+  // SSN Pattern: 123-45-6789
+  stage.regex {
+    expression = "(?P<phi_ssn>\\b\\d{3}-\\d{2}-\\d{4}\\b)"
+  }
+
+  // Phone Numbers: (123) 456-7890, 123-456-7890, 123.456.7890
+  stage.regex {
+    expression = "(?P<phi_phone>\\b\\(?\\d{3}\\)?[-. ]?\\d{3}[-. ]?\\d{4}\\b)"
+  }
+
+  // Email Addresses
+  stage.regex {
+    expression = "(?P<phi_email>\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b)"
+  }
+
+  // Medical Record Number (MRN) - common patterns  
+  stage.regex {
+    expression = "(?i)(?P<phi_mrn>(mrn|medical.?record|patient.?id|chart.?number)[:\\s]*[A-Z0-9-]{4,})"
+  }
+
+  // IP Addresses
+  stage.regex {
+    expression = "(?P<phi_ip>\\b\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b)"
+  }
+
+  // Credit Card Numbers
+  stage.regex {
+    expression = "(?P<phi_cc>\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b)"
+  }
+
+  // Street Address patterns
+  stage.regex {
+    expression = "(?P<phi_address>\\b\\d+\\s+[A-Za-z]+\\s+(Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Court|Ct)\\b)"
+  }
+
+  // Date of Birth patterns with context
+  stage.regex {
+    expression = "(?i)(?P<phi_dob>(dob|date.?of.?birth|birthdate|born)[:\\s]*\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})"
+  }
+
+  // Health Plan / Insurance ID patterns
+  stage.regex {
+    expression = "(?i)(?P<phi_insurance>(health.?plan|insurance|member|policy|beneficiary)[:\\s#]*[A-Z0-9-]{6,})"
+  }
+
+  // Build comma-separated list of ALL detected PHI types
+  stage.template {
+    source   = "phi_types"
+    template = "{{ $types := \"\" }}{{ if .phi_ssn }}{{ $types = \"ssn\" }}{{ end }}{{ if .phi_phone }}{{ if $types }}{{ $types = printf \"%s,phone\" $types }}{{ else }}{{ $types = \"phone\" }}{{ end }}{{ end }}{{ if .phi_email }}{{ if $types }}{{ $types = printf \"%s,email\" $types }}{{ else }}{{ $types = \"email\" }}{{ end }}{{ end }}{{ if .phi_mrn }}{{ if $types }}{{ $types = printf \"%s,mrn\" $types }}{{ else }}{{ $types = \"mrn\" }}{{ end }}{{ end }}{{ if .phi_ip }}{{ if $types }}{{ $types = printf \"%s,ip_address\" $types }}{{ else }}{{ $types = \"ip_address\" }}{{ end }}{{ end }}{{ if .phi_cc }}{{ if $types }}{{ $types = printf \"%s,credit_card\" $types }}{{ else }}{{ $types = \"credit_card\" }}{{ end }}{{ end }}{{ if .phi_address }}{{ if $types }}{{ $types = printf \"%s,address\" $types }}{{ else }}{{ $types = \"address\" }}{{ end }}{{ end }}{{ if .phi_dob }}{{ if $types }}{{ $types = printf \"%s,dob\" $types }}{{ else }}{{ $types = \"dob\" }}{{ end }}{{ end }}{{ if .phi_insurance }}{{ if $types }}{{ $types = printf \"%s,insurance_id\" $types }}{{ else }}{{ $types = \"insurance_id\" }}{{ end }}{{ end }}{{ if $types }}{{ $types }}{{ else }}none{{ end }}"
+  }
+
+  // Count how many PHI types were detected
+  stage.template {
+    source   = "phi_count"
+    template = "{{ $count := 0 }}{{ if .phi_ssn }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_phone }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_email }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_mrn }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_ip }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_cc }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_address }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_dob }}{{ $count = add $count 1 }}{{ end }}{{ if .phi_insurance }}{{ $count = add $count 1 }}{{ end }}{{ $count }}"
+  }
+
+  // Set suspected_phi label based on whether any PHI was detected
+  stage.template {
+    source   = "suspected_phi"
+    template = "{{ if or .phi_ssn .phi_phone .phi_email .phi_mrn .phi_ip .phi_cc .phi_address .phi_dob .phi_insurance }}true{{ else }}false{{ end }}"
+  }
+
+  // Apply the labels
+  stage.labels {
+    values = {
+      suspected_phi = "",
+      phi_types     = "",
+      phi_count     = "",
+    }
+  }
+
   forward_to = [loki.write.endpoint.receiver]
 }
 
-// 7. LOKI CLIENT: Write to Loki instance
+// 8. LOKI CLIENT: Write to Loki instance
 loki.write "endpoint" {
   endpoint {
     url = "http://loki.dfci.harvard.edu/loki/api/v1/push"
   }
 }
+// =============================================================================
+// PHI DETECTION PATTERNS SUMMARY:
+// - SSN: Social Security Numbers (XXX-XX-XXXX)
+// - Phone: US phone numbers in various formats
+// - Email: Email addresses
+// - DOB: Dates of birth with context keywords
+// - MRN: Medical Record Numbers with context
+// - IP Address: IPv4 addresses
+// - Insurance ID: Health plan/insurance identifiers
+// - Credit Card: 16-digit card numbers
+// - Address: Street addresses
+//
+// Labels added when PHI detected:
+//   suspected_phi = "true" | "false"
+//   phi_types     = "ssn,email,phone" (comma-separated list of ALL detected types)
+//   phi_count     = "3" (number of PHI types found)
+//
+// Query examples in Grafana:
+//   {suspected_phi="true"}                    -- All logs with PHI
+//   {phi_types=~".*ssn.*"}                    -- Logs containing SSN
+//   {phi_types=~".*email.*"}                  -- Logs containing email
+//   {phi_types=~".*ssn.*", phi_types=~".*email.*"}  -- SSN AND email
+//   {phi_count="3"}                           -- Logs with exactly 3 PHI types
+// =============================================================================

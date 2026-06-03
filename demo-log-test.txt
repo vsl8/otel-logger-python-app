@@ -1,0 +1,31 @@
+# Test in your Python app or just log these messages:
+
+# SSN - will tag: suspected_phi="true", phi_type="ssn"
+"Processing patient with SSN 123-45-6789 in system"
+
+# Phone - will tag: phi_type="phone"
+"Contact number updated: (617) 555-1234 for user account"
+
+# Email - will tag: phi_type="email"
+"Notification sent to john.doe@hospital.org successfully"
+
+# MRN - will tag: phi_type="mrn"
+"Looking up MRN: ABC12345678 in medical records"
+
+# IP Address - will tag: phi_type="ip_address"
+"Request received from 192.168.1.100 for patient data"
+
+# Credit Card - will tag: phi_type="credit_card"
+"Payment processed with card 4111-1111-1111-1111"
+
+# Address - will tag: phi_type="address"
+"Patient lives at 123 Main Street in Boston"
+
+# DOB - will tag: phi_type="dob"
+"Patient DOB: 01/15/1985 verified in system"
+
+# Insurance - will tag: phi_type="insurance_id"
+"Insurance Policy# BCBS-987654321 verified"
+
+# Clean log (no PHI) - will tag: suspected_phi="false", phi_type="none"
+"Application started successfully on port 8080"
