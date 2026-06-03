@@ -180,6 +180,16 @@ topk(10, sum by (service_name) (count_over_time({suspected_phi="true"}[24h])))
 |----------|---------|-------------|
 | Loki URL | `http://loki.dfci.harvard.edu/loki/api/v1/push` | Loki push endpoint |
 | gRPC Port | `4317` | OTLP gRPC receiver port |
+| HTTP Port | `4318` | OTLP HTTP receiver port |
+
+### OTLP Endpoints
+
+| Protocol | Port | Endpoint |
+|----------|------|----------|
+| gRPC | 4317 | `grpc://alloy-host:4317` |
+| HTTP Traces | 4318 | `http://alloy-host:4318/v1/traces` |
+| HTTP Metrics | 4318 | `http://alloy-host:4318/v1/metrics` |
+| HTTP Logs | 4318 | `http://alloy-host:4318/v1/logs` |
 
 ### Modifying the Configuration
 

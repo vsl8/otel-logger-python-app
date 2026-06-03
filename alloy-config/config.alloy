@@ -1,12 +1,16 @@
-// 1. RECEIVER: Listen for gRPC OTLP on port 4317 (traces AND logs)
+// 1. RECEIVER: Listen for gRPC and HTTP OTLP endpoints
 otelcol.receiver.otlp "default" {
   grpc {
     endpoint = "0.0.0.0:4317"
   }
   
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  
   output {
     traces = [otelcol.connector.spanlogs.default.input]
-    logs   = [otelcol.processor.attributes.add_label.input]  // <-- ADD THIS LINE
+    logs   = [otelcol.processor.attributes.add_label.input]
   }
 }
 
