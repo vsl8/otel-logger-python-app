@@ -5,13 +5,14 @@ Supports sending telemetry data to OTEL collector via gRPC or HTTP.
 
 import os
 import logging
+import socket
 from flask import Flask, render_template, jsonify, request
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_NAMESPACE, SERVICE_INSTANCE_ID, SERVICE_VERSION
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GrpcSpanExporter
@@ -29,7 +30,8 @@ from opentelemetry.instrumentation.flask import FlaskInstrumentor
 #       HTTP endpoints use http://host:port format
 OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "10.112.82.249:4317")
 OTEL_PROTOCOL = os.getenv("OTEL_PROTOCOL", "grpc")  # grpc or http
-SERVICE_NAME_VALUE = os.getenv("SERVICE_NAME", "otel-logger-app")
+SERVICE_NAME_VALUE = os.getenv("OTEL_SERVICE_NAME", "otel-logger-app")
+DEBUG_CONSOLE = os.getenv("OTEL_DEBUG", "false").lower() == "true"
 
 # Current configuration (can be updated at runtime)
 current_config = {
@@ -37,8 +39,14 @@ current_config = {
     "protocol": OTEL_PROTOCOL
 }
 
-# Create resource
-resource = Resource.create({SERVICE_NAME: SERVICE_NAME_VALUE})
+# Create resource with required attributes for Tempo
+# service.name is REQUIRED for traces to appear in Tempo's service list
+resource = Resource.create({
+    SERVICE_NAME: SERVICE_NAME_VALUE,
+    SERVICE_NAMESPACE: "otel-demo",
+    SERVICE_INSTANCE_ID: socket.gethostname(),
+    SERVICE_VERSION: "1.0.0",
+})
 
 # Initialize providers (will be set up in setup_telemetry)
 tracer_provider = None
@@ -96,11 +104,26 @@ def setup_telemetry(endpoint=None, protocol=None):
     # Get exporters
     exporters = get_exporters(current_config["endpoint"], current_config["protocol"])
     
-    # Setup Tracer Provider
+    # Print resource info for debugging
+    print(f"[OTEL] Initializing with resource: {resource.attributes}")
+    print(f"[OTEL] service.name = {resource.attributes.get('service.name')}")
+    print(f"[OTEL] Endpoint: {current_config['endpoint']}, Protocol: {current_config['protocol']}")
+    
+    # Setup Tracer Provider with resource
     tracer_provider = TracerProvider(resource=resource)
+    
+    # Add OTLP exporter for sending to collector
     tracer_provider.add_span_processor(BatchSpanProcessor(exporters["trace"]))
+    
+    # Optionally add console exporter for debugging
+    if DEBUG_CONSOLE:
+        print("[OTEL] Console span exporter enabled for debugging")
+        tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+    
     trace.set_tracer_provider(tracer_provider)
-    tracer = trace.get_tracer(__name__)
+    
+    # Get tracer with service name as instrumentation scope
+    tracer = trace.get_tracer(SERVICE_NAME_VALUE, "1.0.0")
     
     # Setup Meter Provider
     metric_reader = PeriodicExportingMetricReader(exporters["metric"], export_interval_millis=5000)
@@ -142,6 +165,34 @@ FlaskInstrumentor().instrument_app(app)
 def index():
     """Render the main UI."""
     return render_template("index.html", config=current_config)
+
+
+@app.route("/debug/otel")
+def debug_otel():
+    """Debug endpoint to verify OTEL configuration."""
+    return jsonify({
+        "service_name": SERVICE_NAME_VALUE,
+        "resource_attributes": dict(resource.attributes),
+        "endpoint": current_config["endpoint"],
+        "protocol": current_config["protocol"],
+        "tracer_provider_active": tracer_provider is not None,
+        "debug_console": DEBUG_CONSOLE
+    })
+
+
+@app.route("/debug/flush", methods=["POST"])
+def flush_telemetry():
+    """Force flush all telemetry data."""
+    try:
+        if tracer_provider:
+            tracer_provider.force_flush()
+        if meter_provider:
+            meter_provider.force_flush()
+        if logger_provider:
+            logger_provider.force_flush()
+        return jsonify({"success": True, "message": "Telemetry flushed"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/config", methods=["GET", "POST"])
@@ -275,8 +326,36 @@ def health():
     })
 
 
+# Ensure telemetry is flushed on shutdown
+import atexit
+
+def shutdown_telemetry():
+    """Flush and shutdown telemetry providers."""
+    print("[OTEL] Shutting down telemetry providers...")
+    if tracer_provider:
+        tracer_provider.force_flush()
+        tracer_provider.shutdown()
+    if meter_provider:
+        meter_provider.force_flush()
+        meter_provider.shutdown()
+    if logger_provider:
+        logger_provider.force_flush()
+        logger_provider.shutdown()
+    print("[OTEL] Telemetry shutdown complete")
+
+atexit.register(shutdown_telemetry)
+
+
 if __name__ == "__main__":
     print(f"Starting OTEL Logger App...")
+    print(f"Service Name: {SERVICE_NAME_VALUE}")
+    print(f"Resource: {dict(resource.attributes)}")
     print(f"OTEL Endpoint: {current_config['endpoint']}")
     print(f"OTEL Protocol: {current_config['protocol']}")
+    print(f"Debug console: {DEBUG_CONSOLE}")
+    print("---")
+    print("Debug endpoints:")
+    print("  GET  /debug/otel  - View OTEL configuration")
+    print("  POST /debug/flush - Force flush telemetry")
+    print("---")
     app.run(host="0.0.0.0", port=5000, debug=True)
