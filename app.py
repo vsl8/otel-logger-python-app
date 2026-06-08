@@ -24,8 +24,10 @@ from opentelemetry.instrumentation.flask import FlaskInstrumentor
 
 
 # Configuration from environment variables
-# Default endpoint points to Grafana Alloy server
-OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://10.112.82.249:4317")
+# Default endpoint points to OTEL Collector server
+# Note: gRPC endpoints use host:port format (no http:// prefix)
+#       HTTP endpoints use http://host:port format
+OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "10.112.82.249:4317")
 OTEL_PROTOCOL = os.getenv("OTEL_PROTOCOL", "grpc")  # grpc or http
 SERVICE_NAME_VALUE = os.getenv("SERVICE_NAME", "otel-logger-app")
 
@@ -51,7 +53,13 @@ log_counter = None
 def get_exporters(endpoint, protocol):
     """Get exporters based on protocol type."""
     if protocol.lower() == "http":
-        # HTTP endpoints typically use different ports/paths
+        # HTTP endpoints need http:// prefix
+        if not endpoint.startswith("http://") and not endpoint.startswith("https://"):
+            endpoint = f"http://{endpoint}"
+        # HTTP uses port 4318 by default, adjust if using gRPC port
+        if endpoint.endswith(":4317"):
+            endpoint = endpoint.replace(":4317", ":4318")
+        
         traces_endpoint = f"{endpoint}/v1/traces"
         metrics_endpoint = f"{endpoint}/v1/metrics"
         logs_endpoint = f"{endpoint}/v1/logs"
@@ -62,6 +70,12 @@ def get_exporters(endpoint, protocol):
             "log": HttpLogExporter(endpoint=logs_endpoint)
         }
     else:  # grpc
+        # gRPC endpoints should NOT have http:// prefix
+        if endpoint.startswith("http://"):
+            endpoint = endpoint.replace("http://", "")
+        elif endpoint.startswith("https://"):
+            endpoint = endpoint.replace("https://", "")
+        
         return {
             "trace": GrpcSpanExporter(endpoint=endpoint, insecure=True),
             "metric": GrpcMetricExporter(endpoint=endpoint, insecure=True),
